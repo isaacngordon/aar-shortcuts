@@ -1,4 +1,3 @@
-const axios = require('axios');
 const cheerio = require('cheerio');
 const {chromium} = require('playwright');
 dotenv = require('dotenv');
