@@ -7,6 +7,12 @@ const MTA_USERNAME = process.env.MTA_USERNAME;
 const MTA_PASSWORD = process.env.MTA_PASSWORD;
 const HEADLESS = process.env.NODE_ENV === 'production' ? true : false;
 
+
+function makeRelativeLinksAbsolute(html){
+    // replace any relative links with absolute links
+    return html.replace(/href="\//g, 'href="https://aar.mta.info/');
+}
+
 /**
  * Get authentication tokens from MTA website, which is a React application
  */
@@ -19,7 +25,8 @@ async function getAuthenticatedChromium(){
     await page.goto(loginPage);
     await page.waitForLoadState('networkidle');
 
-    await page.screenshot({path: `${process.env.HOME}/Downloads/pre-login.png`});
+    if(!HEADLESS)
+        await page.screenshot({path: `${process.env.HOME}/Downloads/pre-login.png`});
     
     // Enter username and password and submit
     await page.type(`input[name="username"]`, MTA_USERNAME);
@@ -29,7 +36,8 @@ async function getAuthenticatedChromium(){
     await page.click(`button[type="submit"]`);
     
     // return the authenticated browser and the page
-    await page.screenshot({path: `${process.env.HOME}/Downloads/post-login.png`});
+    if(!HEADLESS)
+        await page.screenshot({path: `${process.env.HOME}/Downloads/post-login.png`});
     
     return {browser, page};
 }
@@ -49,8 +57,8 @@ async function getSchedule(){
         // await page.goto(url);
         // await page.waitForLoadState('networkidle');
 
-        // Extract the schedule data
-        await page.screenshot({path: `${process.env.HOME}/Downloads/pre-cheerio.png`});
+        if(!HEADLESS)
+            await page.screenshot({path: `${process.env.HOME}/Downloads/pre-cheerio.png`});
     
         // get page's url
         let pageUrl = page.url();
@@ -59,7 +67,8 @@ async function getSchedule(){
         while(pageUrl !== url){
             console.log("whilin' out");
             await page.waitForLoadState('networkidle');
-            await page.screenshot({path: `${process.env.HOME}/Downloads/finally-idle.png`});
+            if(!HEADLESS)
+                await page.screenshot({path: `${process.env.HOME}/Downloads/finally-idle.png`});
             pageUrl = page.url();
             console.log("\n\n Page URL:\n", pageUrl);
         }
@@ -73,14 +82,15 @@ async function getSchedule(){
         while(schedule.includes("Loading")){
             console.log("whilin' out again");
             await page.waitForLoadState('networkidle');
-            await page.screenshot({path: `${process.env.HOME}/Downloads/finally-idle2.png`});
+            if(!HEADLESS)
+                await page.screenshot({path: `${process.env.HOME}/Downloads/finally-idle2.png`});
             html = await page.content();
             $ = cheerio.load(html);
             schedule = $(selector).html();
         }
 
         // replace any relative links with absolute links
-        schedule = schedule.replace(/href="\//g, 'href="https://aar.mta.info/');
+        schedule = makeRelativeLinksAbsolute(schedule);
         
         // check the schedule object, which is html text, for an anchor element with inner text "See trip details"
         // if it exists, navigate to the href attribute and get the html text from that page
@@ -92,12 +102,13 @@ async function getSchedule(){
             if(href.length > 0){
                 await page.goto(href);
                 await page.waitForLoadState('networkidle');
-                await page.screenshot({path: `${process.env.HOME}/Downloads/see-details.png`});
+                if(!HEADLESS)
+                    await page.screenshot({path: `${process.env.HOME}/Downloads/see-details.png`});
                 html = await page.content();
                 $ = cheerio.load(html);
                 const itinerarySelector = "div[class=itinerary]";
                 schedule = $(itinerarySelector).html();
-                schedule = schedule.replace(/href="\//g, 'href="https://aar.mta.info/');
+                schedule = makeRelativeLinksAbsolute(schedule);
                 
             }
             
