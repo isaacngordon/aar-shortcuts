@@ -18,6 +18,7 @@ function makeRelativeLinksAbsolute(html) {
  */
 async function getAuthenticatedChromium() {
     const loginPage = 'https://aar.mta.info/login';
+    concole.log("Headless set to: ", HEADLESS);
     const browser = await chromium.launch({ headless: HEADLESS });
     const page = await browser.newPage();
 
