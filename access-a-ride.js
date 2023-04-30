@@ -5,7 +5,7 @@ dotenv.config();
 
 const MTA_USERNAME = process.env.MTA_USERNAME;
 const MTA_PASSWORD = process.env.MTA_PASSWORD;
-const HEADLESS = process.env.NODE_ENV === 'production' ? true : false;
+const HEADLESS = process.env.NODE_ENV === 'development' ? false : true;
 
 
 function makeRelativeLinksAbsolute(html) {
@@ -25,8 +25,7 @@ async function getAuthenticatedChromium() {
     await page.goto(loginPage);
     await page.waitForLoadState('networkidle');
 
-    if (!HEADLESS)
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-login.png` });
+    if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-login.png` }); }
 
     // Enter username and password and submit
     await page.type(`input[name="username"]`, MTA_USERNAME);
@@ -36,8 +35,7 @@ async function getAuthenticatedChromium() {
     await page.click(`button[type="submit"]`);
 
     // return the authenticated browser and the page
-    if (!HEADLESS)
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/post-login.png` });
+    if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/post-login.png` }); }
 
     return { browser, page };
 }
@@ -50,25 +48,27 @@ async function getAuthenticatedChromium() {
  * @returns 
  */
 async function getSchedule() {
-    const url = 'https://aar.mta.info/trip-booking';
+    const tripBookingUrl = 'https://aar.mta.info/trip-booking';
     const selector = "div[class=trip-dashboard]"
 
     const { browser, page } = await getAuthenticatedChromium();
-    // await page.goto(url);
+    // await page.goto(tripBookingUrl);
     // await page.waitForLoadState('networkidle');
 
     if (!HEADLESS)
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });
+        {await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });}
 
     // get page's url
     let pageUrl = page.url();
     console.log("\n\n Page URL:\n", pageUrl);
-
-    while (pageUrl !== url) {
-        console.log("whilin' out");
+    let attempt = 1;
+    while (pageUrl !== tripBookingUrl) {
+        console.log("attempt trip booking url: ", attempt++);
+        if(attempt > 10) {
+            throw new Error("Unable to get trip booking url");
+        }
         await page.waitForLoadState('networkidle');
-        if (!HEADLESS)
-            await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle.png` });
+        if (HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle_${attempt}.png` }); }
         pageUrl = page.url();
         console.log("\n\n Page URL:\n", pageUrl);
     }
@@ -79,11 +79,15 @@ async function getSchedule() {
     // Use Cheerio selectors to extract the schedule data
     let schedule = $(selector).html();
     // WHile schedule contains the word "Loading", wait for the page to load
+    attempt = 1;
     while (schedule.includes("Loading")) {
-        console.log("whilin' out again");
+        console.log("attempt loading trip dashboard element: ", attempt++);
+        if(attempt > 10) {
+            throw new Error("Unable to load trip dashboard component.");
+        }
         await page.waitForLoadState('networkidle');
         if (!HEADLESS)
-            await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` });
+            {await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` });}
         html = await page.content();
         $ = cheerio.load(html);
         schedule = $(selector).html();
