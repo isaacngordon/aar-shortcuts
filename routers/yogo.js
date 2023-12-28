@@ -6,7 +6,7 @@ const router = express.Router();
 // Serve static files from the "../yogo" directory
 router.use('/', (req, res, next) => {
     const currentDate = new Date();
-    const targetDate = new Date('December 28, 2023');
+    const targetDate = new Date('December 29, 2023');
     
     if (currentDate >= targetDate) {
         res.status(410);
