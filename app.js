@@ -9,6 +9,8 @@ const express = require('express');
 
 const app = express();
 const aar = require('./access-a-ride');
+const yogoRouter = require('./routers/yogo');
+
 app.get("/", (req, res) => {
     res.contentType('text/html');
     res.status(200).send("<a href='/schedule'>Schedule</a>");
@@ -25,6 +27,8 @@ app.get('/schedule', async (req, res) => {
     res.status(500).send('Internal Server Error : '+error);
   }
 });
+
+app.use('/yogo', yogoRouter);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
