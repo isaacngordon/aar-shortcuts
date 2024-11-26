@@ -11,14 +11,28 @@ const app = express();
 const aar = require('./access-a-ride');
 const yogoRouter = require('./routers/yogo');
 
+let cachedSchedule = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in milliseconds
+
 app.get("/", (req, res) => {
     res.contentType('text/html');
     res.status(200).send("<a href='/schedule'>Schedule</a>");
 });
 
 app.get('/schedule', async (req, res) => {
+  const currentTime = Date.now();
+
+  if (cachedSchedule && (currentTime - lastFetchTime < CACHE_DURATION)) {
+    console.log("Serving cached schedule");
+    res.contentType('text/html');
+    return res.status(200).send("<html>"+cachedSchedule+"</html>");
+  }
+
   try {
     const schedule = await aar.getSchedule();
+    cachedSchedule = schedule;
+    lastFetchTime = currentTime;
     console.log("\nSchedule:\n", schedule);
     res.contentType('text/html');
     res.status(200).send("<html>"+schedule+"</html>");
