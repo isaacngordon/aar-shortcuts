@@ -11,7 +11,7 @@ const app = express();
 const aar = require('./access-a-ride');
 const yogoRouter = require('./routers/yogo');
 
-let cachedNextRide = null;
+
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
 const CACHE = new Map();
 
@@ -65,7 +65,7 @@ app.get('/schedule', async (req, res) => {
   }
     console.log("CACHE miss for schedule.");
     try {
-      const schedule = await aar.getUpcomingTripsHtml(exclude_cancelled);
+      const schedule = await aar.getUpcomingTripsHtml(exclude_cancelled, 5);
       CACHE.set(cacheKey, { data: schedule, lastFetchedAt: currentTime });
       console.log("CACHED schedule HTML.");
       res.contentType('text/html');

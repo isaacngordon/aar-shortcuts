@@ -146,7 +146,7 @@ async function extractNextRideDetailsHtml(tripDashboardHtml, page) {
     return `${tripDate}\n${itinerary}`;
 }
 
-async function getUpcomingTripsHtml(exclude_cancelled) {
+async function getUpcomingTripsHtml(exclude_cancelled, max_rides) {
     const { browser, page } = await getAuthenticatedChromium();
 
     const upcomingTripsUrl = 'https://aar.mta.info/trips/upcoming';
@@ -165,6 +165,10 @@ async function getUpcomingTripsHtml(exclude_cancelled) {
     let reservations = extractUpcomingTripDetails(html);
     if (exclude_cancelled) {
         reservations = reservations.filter(reservation => reservation.status !== 'Cancelled');
+    }
+
+    if (max_rides && reservations.length > max_rides) {
+        reservations = reservations.slice(0, max_rides);
     }
 
     let returnHtml = "<div>" + reservations.map(reservation => 
