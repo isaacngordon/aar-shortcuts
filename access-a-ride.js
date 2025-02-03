@@ -171,15 +171,17 @@ async function getUpcomingTripsHtml(exclude_cancelled, max_rides) {
         reservations = reservations.slice(0, max_rides);
     }
 
-    let returnHtml = "<div>" + reservations.map(reservation => 
-        `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
-            <p><b>${reservation.date} | ${reservation.time}</b> (${reservation.status})</p>
+    const options = { weekday: 'short', month: 'short', day: 'numeric' };
+    let returnHtml = "<div>" + reservations.map(reservation => {
+        const date = new Date(reservation.date).toLocaleDateString('en-US', options);
+        return `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
+            <p><b>${date} | ${reservation.time}</b> (${reservation.status})</p>
             <ul>
                 <li> <b>Pick Up:</b> ${reservation.from.substring(0, reservation.from.length - 14)}</li>
                 <li> <b>Drop Off:</b> ${reservation.to.substring(0, reservation.to.length - 14)}</li>
             </ul>
-        </div>`
-    ).join('\n') + "</div>";
+        </div>`;
+    }).join('\n') + "</div>";
 
     await page.close();
     await browser.close();
