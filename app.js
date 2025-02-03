@@ -35,10 +35,11 @@ app.get('/schedule', async (req, res) => {
     lastFetchTime = currentTime;
     console.log("\nSchedule:\n", schedule);
     res.contentType('text/html');
-    res.status(200).send("<html>"+schedule+"</html>");
+    let sched_html = schedule !== undefined ? schedule : "<p>No schedule found</p>";
+    res.status(200).send("<html>"+sched_html+"</html>");
   } catch (error) {
     console.error(error);
-    res.status(500).send('Internal Server Error : '+error);
+    res.status(500).send('Internal Server Error: Schedule not available');
   }
 });
 

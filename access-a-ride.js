@@ -1,12 +1,13 @@
 const cheerio = require('cheerio');
 const { chromium } = require('playwright');
+const { sleep } = require('./utils');
 dotenv = require('dotenv');
 dotenv.config();
 
-const MTA_USERNAME = process.env.MTA_USERNAME;
-const MTA_PASSWORD = process.env.MTA_PASSWORD;
-const HEADLESS = process.env.NODE_ENV === 'development' ? false : true;
-
+const MTA_USERNAME = process.env.MTA_USERNAME ? process.env.MTA_USERNAME : (() => { throw new Error("MTA_USERNAME not set"); })();
+const MTA_PASSWORD = process.env.MTA_PASSWORD ? process.env.MTA_PASSWORD : (() => { throw new Error("MTA_PASSWORD not set"); })();
+const HEADLESS = process.env.NODE_ENV !== 'development';
+console.log("HEADLESS =", HEADLESS, "because the env is: ", process.env.NODE_ENV);
 
 function makeRelativeLinksAbsolute(html) {
     // replace any relative links with absolute links
@@ -18,15 +19,18 @@ function makeRelativeLinksAbsolute(html) {
  */
 async function getAuthenticatedChromium() {
     const loginPage = 'https://aar.mta.info/login';
-    console.log("Headless set to: ", HEADLESS);
+    console.log("Opening and authenticating with AAR in a browser with Headless is set to", HEADLESS);
     const browser = await chromium.launch({ headless: HEADLESS });
     const page = await browser.newPage();
 
     // Navigate to login page
     await page.goto(loginPage);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
-    if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-login.png` }); }
+    if (!HEADLESS) { 
+        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-login.png` }); 
+        console.log("Screenshot saved to: ", `${process.env.HOME}/Downloads/pre-login.png`);
+    }
 
     // Enter username and password and submit
     await page.type(`input[name="username"]`, MTA_USERNAME);
@@ -36,7 +40,25 @@ async function getAuthenticatedChromium() {
     await page.click(`button[type="submit"]`);
 
     // return the authenticated browser and the page
-    if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/post-login.png` }); }
+    if (!HEADLESS) { 
+        await page.screenshot({ path: `${process.env.HOME}/Downloads/post-login.png` });
+        console.log("Screenshot saved to: ", `${process.env.HOME}/Downloads/post-login.png`);
+    }
+    await page.waitForLoadState('domcontentloaded');
+    let pageUrl = page.url();
+    console.log("Initial Page URL:", pageUrl);
+    
+    // ensure we've navigated to the dashboard page before returning
+    let attempt = 1;
+    const dashboardPage = 'https://aar.mta.info/trip-booking';
+    while (pageUrl !== dashboardPage) {
+        await sleep(1000);
+        await page.waitForLoadState('domcontentloaded');
+        if (HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle_${attempt}.png` }); }
+        pageUrl = page.url();
+        console.log(`\t[${attempt++}]Current Page URL:`, pageUrl);
+    }
+
 
     return { browser, page };
 }
@@ -49,80 +71,79 @@ async function getAuthenticatedChromium() {
  * @returns 
  */
 async function getSchedule() {
-    const tripBookingUrl = 'https://aar.mta.info/trip-booking';
+    const dashboardPage = 'https://aar.mta.info/trip-booking';
     const selector = "div[class=trip-dashboard]"
 
     const { browser, page } = await getAuthenticatedChromium();
-    // await page.goto(tripBookingUrl);
-    // await page.waitForLoadState('networkidle');
 
-    if (!HEADLESS)
-        {await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });}
-
-    // get page's url
-    let pageUrl = page.url();
-    console.log("\n\n Page URL:\n", pageUrl);
-    let attempt = 1;
-    while (pageUrl !== tripBookingUrl) {
-        console.log("attempt trip booking url: ", attempt++);
-        if(attempt > 10) {
-            throw new Error("Unable to get trip booking url");
-        }
-        await page.waitForLoadState('networkidle');
-        if (HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle_${attempt}.png` }); }
-        pageUrl = page.url();
-        console.log("\n\n Page URL:\n", pageUrl);
+    if (!HEADLESS){
+        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });
     }
 
     let html = await page.content();
     let $ = cheerio.load(html);
 
     // Use Cheerio selectors to extract the schedule data
-    let schedule = $(selector).html();
+    let tripDashboardHtml = $(selector).html();
     // WHile schedule contains the word "Loading", wait for the page to load
     attempt = 1;
-    while (schedule.includes("Loading")) {
+    while (tripDashboardHtml.includes("Loading")) {
         console.log("attempt loading trip dashboard element: ", attempt++);
         if(attempt > 10) {
             throw new Error("Unable to load trip dashboard component.");
         }
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
         if (!HEADLESS)
             {await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` });}
         html = await page.content();
         $ = cheerio.load(html);
-        schedule = $(selector).html();
+        tripDashboardHtml = $(selector).html();
     }
 
     // replace any relative links with absolute links
-    schedule = makeRelativeLinksAbsolute(schedule);
+    tripDashboardHtml = makeRelativeLinksAbsolute(tripDashboardHtml);
+    let nextTripDetailsHtml = await getNextRide(tripDashboardHtml, page);
+    await page.close();
+    await browser.close();
+    return nextTripDetailsHtml;
 
+}
+
+async function getNextRide(tripDashboardHtml, page) {
     // check the schedule object, which is html text, for an anchor element with inner text "See trip details"
     // if it exists, navigate to the href attribute and get the html text from that page
     const anchorSelector = "a:contains('See trip details')";
-    const anchor = cheerio.load(schedule)(anchorSelector);
+    const anchor = cheerio.load(tripDashboardHtml)(anchorSelector);
+    let tripDate = undefined;
+    let itinerary = undefined;
+
     if (anchor.length > 0) {
         const href = anchor.attr('href');
-        console.log("\n\n see details href:\n", href);
-        if (href.length > 0) {
+        if (href.length >0) {
+            console.log("Navigating to trip details page:", href);
             await page.goto(href);
+            //  im waiting for all of them bc im not sure which on in this case lol
+            await page.waitForLoadState('domcontentloaded');
+            await page.waitForLoadState('load');
             await page.waitForLoadState('networkidle');
             if (!HEADLESS)
                 await page.screenshot({ path: `${process.env.HOME}/Downloads/see-details.png` });
             html = await page.content();
             $ = cheerio.load(html);
+            
+            const tripDateSelector = "div[class=trip-date]";
+            tripDate = $(tripDateSelector).html();
+            tripDate = makeRelativeLinksAbsolute(tripDate);
+
             const itinerarySelector = "div[class=itinerary]";
-            schedule = $(itinerarySelector).html();
-            schedule = makeRelativeLinksAbsolute(schedule);
-
-        }
-
+            itinerary = $(itinerarySelector).html();
+            itinerary = makeRelativeLinksAbsolute(itinerary);
+        } 
     }
+    
+    if (!itinerary) return null;
 
-    await page.close();
-    await browser.close();
-    return schedule;
-
+    return `${tripDate}\n${itinerary}`;
 }
 
 

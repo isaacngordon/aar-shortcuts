@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "launch": "pm2 stop \"aar\" & pm2 delete \"aar\" & pm2 start app.js --name \"aar\" --watch --ignore-watch=\"node_modules\" --max-restarts 10"
   },
