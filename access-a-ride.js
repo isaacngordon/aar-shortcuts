@@ -175,8 +175,8 @@ async function getUpcomingTripsHtml(exclude_cancelled, max_rides) {
         `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
             <p><b>${reservation.date} | ${reservation.time}</b> (${reservation.status})</p>
             <ul>
-                <li> <b>Pick Up:</b> ${reservation.from}.</li>
-                <li> <b>Drop Off:</b> ${reservation.to}.</li>
+                <li> <b>Pick Up:</b> ${reservation.from.substring(0, reservation.from.length - 14)}</li>
+                <li> <b>Drop Off:</b> ${reservation.to.substring(0, reservation.to.length - 14)}</li>
             </ul>
         </div>`
     ).join('\n') + "</div>";
