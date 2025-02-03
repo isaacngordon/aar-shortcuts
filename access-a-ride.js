@@ -27,8 +27,8 @@ async function getAuthenticatedChromium() {
     await page.goto(loginPage);
     await page.waitForLoadState('domcontentloaded');
 
-    if (!HEADLESS) { 
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-login.png` }); 
+    if (!HEADLESS) {
+        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-login.png` });
         console.log("Screenshot saved to: ", `${process.env.HOME}/Downloads/pre-login.png`);
     }
 
@@ -40,14 +40,14 @@ async function getAuthenticatedChromium() {
     await page.click(`button[type="submit"]`);
 
     // return the authenticated browser and the page
-    if (!HEADLESS) { 
+    if (!HEADLESS) {
         await page.screenshot({ path: `${process.env.HOME}/Downloads/post-login.png` });
         console.log("Screenshot saved to: ", `${process.env.HOME}/Downloads/post-login.png`);
     }
     await page.waitForLoadState('domcontentloaded');
     let pageUrl = page.url();
     console.log("Initial Page URL:", pageUrl);
-    
+
     // ensure we've navigated to the dashboard page before returning
     let attempt = 1;
     const dashboardPage = 'https://aar.mta.info/trip-booking';
@@ -57,6 +57,9 @@ async function getAuthenticatedChromium() {
         if (HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle_${attempt}.png` }); }
         pageUrl = page.url();
         console.log(`\t[${attempt++}]Current Page URL:`, pageUrl);
+        if (attempt > 10) {
+            throw new Error("Unable to get trip booking url");
+        }
     }
 
 
@@ -71,12 +74,10 @@ async function getAuthenticatedChromium() {
  * @returns 
  */
 async function getSchedule() {
-    const dashboardPage = 'https://aar.mta.info/trip-booking';
-    const selector = "div[class=trip-dashboard]"
 
     const { browser, page } = await getAuthenticatedChromium();
 
-    if (!HEADLESS){
+    if (!HEADLESS) {
         await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });
     }
 
@@ -84,32 +85,32 @@ async function getSchedule() {
     let $ = cheerio.load(html);
 
     // Use Cheerio selectors to extract the schedule data
-    let tripDashboardHtml = $(selector).html();
+    const dashboardSelector = "div[class=trip-dashboard]"
+    let tripDashboardHtml = $(dashboardSelector).html();
     // WHile schedule contains the word "Loading", wait for the page to load
     attempt = 1;
     while (tripDashboardHtml.includes("Loading")) {
         console.log("attempt loading trip dashboard element: ", attempt++);
-        if(attempt > 10) {
+        if (attempt > 10) {
             throw new Error("Unable to load trip dashboard component.");
         }
         await page.waitForLoadState('domcontentloaded');
-        if (!HEADLESS)
-            {await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` });}
+        if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` }); }
         html = await page.content();
         $ = cheerio.load(html);
-        tripDashboardHtml = $(selector).html();
+        tripDashboardHtml = $(dashboardSelector).html();
     }
 
     // replace any relative links with absolute links
     tripDashboardHtml = makeRelativeLinksAbsolute(tripDashboardHtml);
-    let nextTripDetailsHtml = await getNextRide(tripDashboardHtml, page);
+    let nextTripDetailsHtml = await extractNextRideDetailsHtml(tripDashboardHtml, page);
     await page.close();
     await browser.close();
     return nextTripDetailsHtml;
 
 }
 
-async function getNextRide(tripDashboardHtml, page) {
+async function extractNextRideDetailsHtml(tripDashboardHtml, page) {
     // check the schedule object, which is html text, for an anchor element with inner text "See trip details"
     // if it exists, navigate to the href attribute and get the html text from that page
     const anchorSelector = "a:contains('See trip details')";
@@ -119,7 +120,7 @@ async function getNextRide(tripDashboardHtml, page) {
 
     if (anchor.length > 0) {
         const href = anchor.attr('href');
-        if (href.length >0) {
+        if (href.length > 0) {
             console.log("Navigating to trip details page:", href);
             await page.goto(href);
             //  im waiting for all of them bc im not sure which on in this case lol
@@ -130,7 +131,7 @@ async function getNextRide(tripDashboardHtml, page) {
                 await page.screenshot({ path: `${process.env.HOME}/Downloads/see-details.png` });
             html = await page.content();
             $ = cheerio.load(html);
-            
+
             const tripDateSelector = "div[class=trip-date]";
             tripDate = $(tripDateSelector).html();
             tripDate = makeRelativeLinksAbsolute(tripDate);
@@ -138,12 +139,59 @@ async function getNextRide(tripDashboardHtml, page) {
             const itinerarySelector = "div[class=itinerary]";
             itinerary = $(itinerarySelector).html();
             itinerary = makeRelativeLinksAbsolute(itinerary);
-        } 
+        }
     }
-    
+
     if (!itinerary) return null;
 
     return `${tripDate}\n${itinerary}`;
+}
+
+async function getUpcomingTrips(page, exclude_cancelled) {
+    const upcomingTripsUrl = 'https://aar.mta.info/trips/upcoming';
+    await page.goto(upcomingTripsUrl);
+    await page.waitForLoadState('domcontentloaded');
+    
+    //  im waiting for all of them bc im not sure which on in this case lol
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForLoadState('load');
+    await page.waitForLoadState('networkidle');
+    if (!HEADLESS) {
+        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-upcoming-trips.png` });
+    }
+
+    let html = await page.content();
+    let reservations = extractUpcomingTripDetails(html);
+    if (exclude_cancelled) {
+        reservations = reservations.filter(reservation => reservation.status !== 'Cancelled');
+    }
+
+    return reservations;
+}
+
+function extractUpcomingTripDetails(html) {
+    const $ = cheerio.load(html);
+    const reservations = [];
+
+    $('.trip-schedule-details').each((_, element) => {
+        const tripElement = $(element);
+
+        // Extracting status (e.g., Scheduled, Cancelled)
+        const status = tripElement.find('.trip-status .state-label').text().trim();
+
+        // Extracting reservation date and time
+        const time = tripElement.find('.trip-date div').text().replace('Reservation Pick-Up Time: ', '').trim();
+        const date = tripElement.find('.trip-time').text().trim();
+
+        // Extracting trip locations
+        const from = tripElement.find('.trip-from span').first().text().trim();
+        const to = tripElement.find('.trip-to span').first().text().trim();
+
+        // Add extracted details to list
+        reservations.push({ date, time, status, from, to });
+    });
+
+    return reservations;
 }
 
 
