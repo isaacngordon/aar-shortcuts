@@ -73,8 +73,7 @@ async function getAuthenticatedChromium() {
  * 
  * @returns 
  */
-async function getSchedule() {
-
+async function getNextTripDetailsHtml() {
     const { browser, page } = await getAuthenticatedChromium();
 
     if (!HEADLESS) {
@@ -147,7 +146,9 @@ async function extractNextRideDetailsHtml(tripDashboardHtml, page) {
     return `${tripDate}\n${itinerary}`;
 }
 
-async function getUpcomingTrips(page, exclude_cancelled) {
+async function getUpcomingTripsHtml(exclude_cancelled) {
+    const { browser, page } = await getAuthenticatedChromium();
+
     const upcomingTripsUrl = 'https://aar.mta.info/trips/upcoming';
     await page.goto(upcomingTripsUrl);
     await page.waitForLoadState('domcontentloaded');
@@ -166,7 +167,19 @@ async function getUpcomingTrips(page, exclude_cancelled) {
         reservations = reservations.filter(reservation => reservation.status !== 'Cancelled');
     }
 
-    return reservations;
+    let returnHtml = "<div>" + reservations.map(reservation => 
+        `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
+            <p><b>${reservation.date} | ${reservation.time}</b> (${reservation.status})</p>
+            <ul>
+                <li> <b>Pick Up:</b> ${reservation.from}.</li>
+                <li> <b>Drop Off:</b> ${reservation.to}.</li>
+            </ul>
+        </div>`
+    ).join('\n') + "</div>";
+
+    await page.close();
+    await browser.close();
+    return returnHtml;
 }
 
 function extractUpcomingTripDetails(html) {
@@ -195,4 +208,5 @@ function extractUpcomingTripDetails(html) {
 }
 
 
-module.exports.getSchedule = getSchedule;
+module.exports.getNextTripDetailsHtml = getNextTripDetailsHtml;
+module.exports.getUpcomingTripsHtml = getUpcomingTripsHtml;

@@ -12,7 +12,7 @@ const aar = require('./access-a-ride');
 const yogoRouter = require('./routers/yogo');
 
 let cachedNextRide = null;
-const CACHE_DURATION = 50000;//60 * 60 * 1000; // 1 hour in milliseconds
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
 const CACHE = new Map();
 
 app.get("/", (req, res) => {
@@ -35,7 +35,7 @@ app.get('/nextRide', async (req, res) => {
 
   try {
     res.contentType('text/html');
-    const nextRideHtml = await aar.getSchedule();
+    const nextRideHtml = await aar.getNextTripDetailsHtml();
     if (nextRideHtml !== undefined) {
       CACHE.set("nextRide", { data: nextRideHtml, lastFetchedAt: currentTime });
       console.log("CACHED nextRide HTML.");
@@ -44,32 +44,37 @@ app.get('/nextRide', async (req, res) => {
       res.status(200).send("<p>No schedule found</p>");
   } catch (error) {
     console.error(error);
-    res.status(500).send('<p>Internal Server Error: Schedule not available</p>');
+    res.status(500).send('<p>Internal Server Error: NextRide details are not available</p>');
   }
 });
 
-// app.get('schedule', async (req, res) => {
-//   const currentTime = Date.now();
-
-//   if (cachedNextRide && (currentTime - lastNextRideFetchTime < CACHE_DURATION)) {
-//     console.log("Serving cached schedule");
-//     res.contentType('text/html');
-//     return res.status(200).send("<html>" + cachedNextRide + "</html>");
-//   }
-
-//   try {
-//     const schedule = await aar.getSchedule();
-//     cachedNextRide = schedule;
-//     lastNextRideFetchTime = currentTime;
-//     console.log("\nSchedule:\n", schedule);
-//     res.contentType('text/html');
-//     let sched_html = schedule !== undefined ? schedule : "<p>No schedule found</p>";
-//     res.status(200).send("<html>" + sched_html + "</html>");
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).send('Internal Server Error: Schedule not available');
-//   }
-// });
+app.get('/schedule', async (req, res) => {
+  const currentTime = Date.now();
+  // extract "cancelled" query param
+  const cancelled = req.query.cancelled;
+  const exclude_cancelled = !(cancelled && cancelled.toLowerCase() === 'true');
+  const cacheKey = `schedule${exclude_cancelled ? "-exclude-cancelled" : ""}`;
+  if (CACHE.has(cacheKey)) {
+    let timeSinceFetch = currentTime - CACHE.get(cacheKey).lastFetchedAt;
+    console.log("timeSinceFetch:", timeSinceFetch);
+    if (timeSinceFetch < CACHE_DURATION) {
+      console.log("Serving cached schedule");
+      res.contentType('text/html');
+      return res.status(200).send("<html>" + CACHE.get(cacheKey).data + "</html>");
+    }
+  }
+    console.log("CACHE miss for schedule.");
+    try {
+      const schedule = await aar.getUpcomingTripsHtml(exclude_cancelled);
+      CACHE.set(cacheKey, { data: schedule, lastFetchedAt: currentTime });
+      console.log("CACHED schedule HTML.");
+      res.contentType('text/html');
+      res.status(200).send("<html>" + schedule + "</html>");
+    } catch (error) {
+      console.error(error);
+      res.status(500).send('<p>Internal Server Error: Schedule not available</p>');
+    }
+});
 
 app.use('/yogo', yogoRouter);
 
