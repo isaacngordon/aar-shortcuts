@@ -23,7 +23,7 @@ async function getAuthenticatedChromium() {
     const loginPage = 'https://aar.mta.info/login';
     console.log("Opening and authenticating with AAR in a browser with Headless is set to", HEADLESS);
     
-    // Use chromium-pack for serverless environments, otherwise use system chromium
+    // Use chromium-pkg for serverless environments, otherwise use system chromium
     const launchOptions = {
         headless: HEADLESS,
     };
