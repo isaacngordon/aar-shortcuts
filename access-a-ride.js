@@ -1,6 +1,4 @@
 const cheerio = require('cheerio');
-const { chromium } = require('playwright-core');
-const chromiumPkg = require('@sparticuz/chromium');
 const { sleep } = require('./utils');
 dotenv = require('dotenv');
 dotenv.config();
@@ -10,6 +8,18 @@ const MTA_PASSWORD = process.env.MTA_PASSWORD ? process.env.MTA_PASSWORD : (() =
 const HEADLESS = process.env.NODE_ENV !== 'development';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCEL;
 console.log("HEADLESS =", HEADLESS, "because the env is: ", process.env.NODE_ENV);
+
+// Import playwright differently based on environment
+let chromium;
+if (IS_PRODUCTION) {
+    // Use playwright-aws-lambda for serverless environments
+    const playwrightAwsLambda = require('playwright-aws-lambda');
+    chromium = playwrightAwsLambda;
+} else {
+    // Use regular playwright for local development
+    const playwright = require('playwright');
+    chromium = playwright.chromium;
+}
 
 function makeRelativeLinksAbsolute(html) {
     // replace any relative links with absolute links
@@ -24,29 +34,16 @@ async function getAuthenticatedChromium() {
     console.log("Opening and authenticating with AAR in a browser with Headless is set to", HEADLESS);
     console.log("IS_PRODUCTION:", IS_PRODUCTION);
     
-    // Use chromium-pkg for serverless environments, otherwise use system chromium
-    const launchOptions = {
-        headless: HEADLESS,
-    };
-    
+    let browser;
     if (IS_PRODUCTION) {
-        // In production (Vercel), use the AWS Lambda-compatible Chromium
-        console.log("Using @sparticuz/chromium for serverless environment");
-        launchOptions.executablePath = await chromiumPkg.executablePath();
-        launchOptions.args = [
-            ...chromiumPkg.args,
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--single-process',
-            '--no-zygote',
-            '--no-sandbox'
-        ];
-        // Force headless for serverless environments
-        launchOptions.headless = true;
+        // In production (Vercel/AWS Lambda), use playwright-aws-lambda
+        console.log("Using playwright-aws-lambda for serverless environment");
+        browser = await chromium.launchChromium();
+    } else {
+        // Local development - use regular playwright with local chromium
+        browser = await chromium.launch({ headless: HEADLESS });
     }
     
-    console.log("Launch options:", JSON.stringify(launchOptions, null, 2));
-    const browser = await chromium.launch(launchOptions);
     const page = await browser.newPage();
     
     // Set longer timeout for serverless environments
