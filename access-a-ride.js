@@ -122,7 +122,7 @@ async function getNextTripDetailsHtml() {
         // Use Cheerio selectors to extract the schedule data
         const dashboardSelector = "div[class=trip-dashboard]"
         let tripDashboardHtml = $(dashboardSelector).html();
-        // WHile schedule contains the word "Loading", wait for the page to load
+        // While schedule contains the word "Loading", wait for the page to load
         let attempt = 1;
         while (tripDashboardHtml.includes("Loading")) {
             console.log("attempt loading trip dashboard element: ", attempt++);
