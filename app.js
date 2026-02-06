@@ -77,8 +77,8 @@ app.get('/schedule', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// For local development
-if (process.env.NODE_ENV !== 'production') {
+// For local development - don't listen when running as Vercel serverless function
+if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });
