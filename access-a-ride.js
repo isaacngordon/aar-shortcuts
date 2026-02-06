@@ -1,5 +1,6 @@
 const cheerio = require('cheerio');
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-core');
+const chromiumPkg = require('@sparticuz/chromium');
 const { sleep } = require('./utils');
 dotenv = require('dotenv');
 dotenv.config();
@@ -7,6 +8,7 @@ dotenv.config();
 const MTA_USERNAME = process.env.MTA_USERNAME ? process.env.MTA_USERNAME : (() => { throw new Error("MTA_USERNAME not set"); })();
 const MTA_PASSWORD = process.env.MTA_PASSWORD ? process.env.MTA_PASSWORD : (() => { throw new Error("MTA_PASSWORD not set"); })();
 const HEADLESS = process.env.NODE_ENV !== 'development';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCEL;
 console.log("HEADLESS =", HEADLESS, "because the env is: ", process.env.NODE_ENV);
 
 function makeRelativeLinksAbsolute(html) {
@@ -20,7 +22,19 @@ function makeRelativeLinksAbsolute(html) {
 async function getAuthenticatedChromium() {
     const loginPage = 'https://aar.mta.info/login';
     console.log("Opening and authenticating with AAR in a browser with Headless is set to", HEADLESS);
-    const browser = await chromium.launch({ headless: HEADLESS });
+    
+    // Use chromium-pack for serverless environments, otherwise use system chromium
+    const launchOptions = {
+        headless: HEADLESS,
+    };
+    
+    if (IS_PRODUCTION) {
+        // In production (Vercel), use the AWS Lambda-compatible Chromium
+        launchOptions.executablePath = await chromiumPkg.executablePath();
+        launchOptions.args = chromiumPkg.args;
+    }
+    
+    const browser = await chromium.launch(launchOptions);
     const page = await browser.newPage();
 
     // Navigate to login page
