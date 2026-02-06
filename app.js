@@ -9,7 +9,6 @@ const express = require('express');
 
 const app = express();
 const aar = require('./access-a-ride');
-const yogoRouter = require('./routers/yogo');
 
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -76,9 +75,14 @@ app.get('/schedule', async (req, res) => {
     }
 });
 
-app.use('/yogo', yogoRouter);
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+  });
+}
+
+// Export for Vercel serverless function
+module.exports = app;
