@@ -10,6 +10,9 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCE
 console.log("HEADLESS =", HEADLESS, "because the env is: ", process.env.NODE_ENV);
 
 // Import playwright differently based on environment
+// Note: playwright-aws-lambda has a different API than regular playwright
+// - Production: uses launchChromium() method
+// - Development: uses chromium.launch() method
 let chromium;
 if (IS_PRODUCTION) {
     // Use playwright-aws-lambda for serverless environments
