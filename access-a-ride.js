@@ -22,6 +22,7 @@ function makeRelativeLinksAbsolute(html) {
 async function getAuthenticatedChromium() {
     const loginPage = 'https://aar.mta.info/login';
     console.log("Opening and authenticating with AAR in a browser with Headless is set to", HEADLESS);
+    console.log("IS_PRODUCTION:", IS_PRODUCTION);
     
     // Use chromium-pkg for serverless environments, otherwise use system chromium
     const launchOptions = {
@@ -30,15 +31,32 @@ async function getAuthenticatedChromium() {
     
     if (IS_PRODUCTION) {
         // In production (Vercel), use the AWS Lambda-compatible Chromium
+        console.log("Using @sparticuz/chromium for serverless environment");
         launchOptions.executablePath = await chromiumPkg.executablePath();
-        launchOptions.args = chromiumPkg.args;
+        launchOptions.args = [
+            ...chromiumPkg.args,
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--single-process',
+            '--no-zygote',
+            '--no-sandbox'
+        ];
+        // Force headless for serverless environments
+        launchOptions.headless = true;
     }
     
+    console.log("Launch options:", JSON.stringify(launchOptions, null, 2));
     const browser = await chromium.launch(launchOptions);
     const page = await browser.newPage();
+    
+    // Set longer timeout for serverless environments
+    if (IS_PRODUCTION) {
+        page.setDefaultTimeout(30000);
+        page.setDefaultNavigationTimeout(30000);
+    }
 
     // Navigate to login page
-    await page.goto(loginPage);
+    await page.goto(loginPage, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForLoadState('domcontentloaded');
 
     if (!HEADLESS) {
@@ -88,39 +106,53 @@ async function getAuthenticatedChromium() {
  * @returns 
  */
 async function getNextTripDetailsHtml() {
-    const { browser, page } = await getAuthenticatedChromium();
+    let browser, page;
+    try {
+        const result = await getAuthenticatedChromium();
+        browser = result.browser;
+        page = result.page;
 
-    if (!HEADLESS) {
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });
-    }
-
-    let html = await page.content();
-    let $ = cheerio.load(html);
-
-    // Use Cheerio selectors to extract the schedule data
-    const dashboardSelector = "div[class=trip-dashboard]"
-    let tripDashboardHtml = $(dashboardSelector).html();
-    // WHile schedule contains the word "Loading", wait for the page to load
-    attempt = 1;
-    while (tripDashboardHtml.includes("Loading")) {
-        console.log("attempt loading trip dashboard element: ", attempt++);
-        if (attempt > 10) {
-            throw new Error("Unable to load trip dashboard component.");
+        if (!HEADLESS) {
+            await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });
         }
-        await page.waitForLoadState('domcontentloaded');
-        if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` }); }
-        html = await page.content();
-        $ = cheerio.load(html);
-        tripDashboardHtml = $(dashboardSelector).html();
+
+        let html = await page.content();
+        let $ = cheerio.load(html);
+
+        // Use Cheerio selectors to extract the schedule data
+        const dashboardSelector = "div[class=trip-dashboard]"
+        let tripDashboardHtml = $(dashboardSelector).html();
+        // WHile schedule contains the word "Loading", wait for the page to load
+        let attempt = 1;
+        while (tripDashboardHtml.includes("Loading")) {
+            console.log("attempt loading trip dashboard element: ", attempt++);
+            if (attempt > 10) {
+                throw new Error("Unable to load trip dashboard component.");
+            }
+            await page.waitForLoadState('domcontentloaded');
+            if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` }); }
+            html = await page.content();
+            $ = cheerio.load(html);
+            tripDashboardHtml = $(dashboardSelector).html();
+        }
+
+        // replace any relative links with absolute links
+        tripDashboardHtml = makeRelativeLinksAbsolute(tripDashboardHtml);
+        let nextTripDetailsHtml = await extractNextRideDetailsHtml(tripDashboardHtml, page);
+        await page.close();
+        await browser.close();
+        return nextTripDetailsHtml;
+    } catch (error) {
+        console.error("Error in getNextTripDetailsHtml:", error);
+        // Ensure browser is closed on error
+        if (page) {
+            try { await page.close(); } catch (e) { console.error("Error closing page:", e); }
+        }
+        if (browser) {
+            try { await browser.close(); } catch (e) { console.error("Error closing browser:", e); }
+        }
+        throw error;
     }
-
-    // replace any relative links with absolute links
-    tripDashboardHtml = makeRelativeLinksAbsolute(tripDashboardHtml);
-    let nextTripDetailsHtml = await extractNextRideDetailsHtml(tripDashboardHtml, page);
-    await page.close();
-    await browser.close();
-    return nextTripDetailsHtml;
-
 }
 
 async function extractNextRideDetailsHtml(tripDashboardHtml, page) {
@@ -161,45 +193,60 @@ async function extractNextRideDetailsHtml(tripDashboardHtml, page) {
 }
 
 async function getUpcomingTripsHtml(exclude_cancelled, max_rides) {
-    const { browser, page } = await getAuthenticatedChromium();
+    let browser, page;
+    try {
+        const result = await getAuthenticatedChromium();
+        browser = result.browser;
+        page = result.page;
 
-    const upcomingTripsUrl = 'https://aar.mta.info/trips/upcoming';
-    await page.goto(upcomingTripsUrl);
-    await page.waitForLoadState('domcontentloaded');
-    
-    //  im waiting for all of them bc im not sure which on in this case lol
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForLoadState('load');
-    await page.waitForLoadState('networkidle');
-    if (!HEADLESS) {
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-upcoming-trips.png` });
+        const upcomingTripsUrl = 'https://aar.mta.info/trips/upcoming';
+        await page.goto(upcomingTripsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.waitForLoadState('domcontentloaded');
+        
+        //  im waiting for all of them bc im not sure which on in this case lol
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForLoadState('load');
+        await page.waitForLoadState('networkidle');
+        if (!HEADLESS) {
+            await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-upcoming-trips.png` });
+        }
+
+        let html = await page.content();
+        let reservations = extractUpcomingTripDetails(html);
+        if (exclude_cancelled) {
+            reservations = reservations.filter(reservation => reservation.status !== 'Cancelled');
+        }
+
+        if (max_rides && reservations.length > max_rides) {
+            reservations = reservations.slice(0, max_rides);
+        }
+
+        const options = { weekday: 'short', month: 'short', day: 'numeric' };
+        let returnHtml = "<div>" + reservations.map(reservation => {
+            const date = new Date(reservation.date).toLocaleDateString('en-US', options);
+            return `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
+                <p><b>${date} | ${reservation.time}</b> (${reservation.status})</p>
+                <ul>
+                    <li> <b>Pick Up:</b> ${reservation.from.substring(0, reservation.from.length - 14)}</li>
+                    <li> <b>Drop Off:</b> ${reservation.to.substring(0, reservation.to.length - 14)}</li>
+                </ul>
+            </div>`;
+        }).join('\n') + "</div>";
+
+        await page.close();
+        await browser.close();
+        return returnHtml;
+    } catch (error) {
+        console.error("Error in getUpcomingTripsHtml:", error);
+        // Ensure browser is closed on error
+        if (page) {
+            try { await page.close(); } catch (e) { console.error("Error closing page:", e); }
+        }
+        if (browser) {
+            try { await browser.close(); } catch (e) { console.error("Error closing browser:", e); }
+        }
+        throw error;
     }
-
-    let html = await page.content();
-    let reservations = extractUpcomingTripDetails(html);
-    if (exclude_cancelled) {
-        reservations = reservations.filter(reservation => reservation.status !== 'Cancelled');
-    }
-
-    if (max_rides && reservations.length > max_rides) {
-        reservations = reservations.slice(0, max_rides);
-    }
-
-    const options = { weekday: 'short', month: 'short', day: 'numeric' };
-    let returnHtml = "<div>" + reservations.map(reservation => {
-        const date = new Date(reservation.date).toLocaleDateString('en-US', options);
-        return `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
-            <p><b>${date} | ${reservation.time}</b> (${reservation.status})</p>
-            <ul>
-                <li> <b>Pick Up:</b> ${reservation.from.substring(0, reservation.from.length - 14)}</li>
-                <li> <b>Drop Off:</b> ${reservation.to.substring(0, reservation.to.length - 14)}</li>
-            </ul>
-        </div>`;
-    }).join('\n') + "</div>";
-
-    await page.close();
-    await browser.close();
-    return returnHtml;
 }
 
 function extractUpcomingTripDetails(html) {
