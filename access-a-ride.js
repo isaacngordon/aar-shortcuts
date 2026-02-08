@@ -8,21 +8,7 @@ const MTA_PASSWORD = process.env.MTA_PASSWORD ? process.env.MTA_PASSWORD : (() =
 const HEADLESS = process.env.NODE_ENV !== 'development';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCEL;
 console.log("HEADLESS =", HEADLESS, "because the env is: ", process.env.NODE_ENV);
-
-// Import playwright differently based on environment
-// Note: playwright-aws-lambda has a different API than regular playwright
-// - Production: uses launchChromium() method
-// - Development: uses chromium.launch() method
-let chromium;
-if (IS_PRODUCTION) {
-    // Use playwright-aws-lambda for serverless environments
-    const playwrightAwsLambda = require('playwright-aws-lambda');
-    chromium = playwrightAwsLambda;
-} else {
-    // Use regular playwright for local development
-    const playwright = require('playwright');
-    chromium = playwright.chromium;
-}
+console.log("IS_PRODUCTION:", IS_PRODUCTION);
 
 function makeRelativeLinksAbsolute(html) {
     // replace any relative links with absolute links
@@ -35,16 +21,23 @@ function makeRelativeLinksAbsolute(html) {
 async function getAuthenticatedChromium() {
     const loginPage = 'https://aar.mta.info/login';
     console.log("Opening and authenticating with AAR in a browser with Headless is set to", HEADLESS);
-    console.log("IS_PRODUCTION:", IS_PRODUCTION);
     
     let browser;
     if (IS_PRODUCTION) {
-        // In production (Vercel/AWS Lambda), use playwright-aws-lambda
-        console.log("Using playwright-aws-lambda for serverless environment");
-        browser = await chromium.launchChromium();
+        // Use playwright-core with @sparticuz/chromium for serverless environments (Vercel/AWS Lambda)
+        console.log("Using playwright-core with @sparticuz/chromium for serverless environment");
+        const chromium = require('@sparticuz/chromium');
+        const { chromium: playwrightChromium } = require('playwright-core');
+        
+        browser = await playwrightChromium.launch({
+            args: chromium.args,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+        });
     } else {
         // Local development - use regular playwright with local chromium
-        browser = await chromium.launch({ headless: HEADLESS });
+        const { chromium: playwrightChromium } = require('playwright');
+        browser = await playwrightChromium.launch({ headless: HEADLESS });
     }
     
     const page = await browser.newPage();
