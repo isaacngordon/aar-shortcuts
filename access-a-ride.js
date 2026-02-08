@@ -1,5 +1,4 @@
 const cheerio = require('cheerio');
-const { chromium } = require('playwright');
 const { sleep } = require('./utils');
 dotenv = require('dotenv');
 dotenv.config();
@@ -7,7 +6,9 @@ dotenv.config();
 const MTA_USERNAME = process.env.MTA_USERNAME ? process.env.MTA_USERNAME : (() => { throw new Error("MTA_USERNAME not set"); })();
 const MTA_PASSWORD = process.env.MTA_PASSWORD ? process.env.MTA_PASSWORD : (() => { throw new Error("MTA_PASSWORD not set"); })();
 const HEADLESS = process.env.NODE_ENV !== 'development';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCEL;
 console.log("HEADLESS =", HEADLESS, "because the env is: ", process.env.NODE_ENV);
+console.log("IS_PRODUCTION:", IS_PRODUCTION);
 
 function makeRelativeLinksAbsolute(html) {
     // replace any relative links with absolute links
@@ -20,11 +21,35 @@ function makeRelativeLinksAbsolute(html) {
 async function getAuthenticatedChromium() {
     const loginPage = 'https://aar.mta.info/login';
     console.log("Opening and authenticating with AAR in a browser with Headless is set to", HEADLESS);
-    const browser = await chromium.launch({ headless: HEADLESS });
+    
+    let browser;
+    if (IS_PRODUCTION) {
+        // Use playwright-core with @sparticuz/chromium for serverless environments (Vercel/AWS Lambda)
+        console.log("Using playwright-core with @sparticuz/chromium for serverless environment");
+        const chromium = require('@sparticuz/chromium');
+        const { chromium: playwrightChromium } = require('playwright-core');
+        
+        browser = await playwrightChromium.launch({
+            args: chromium.args,
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+        });
+    } else {
+        // Local development - use regular playwright with local chromium
+        const { chromium: playwrightChromium } = require('playwright');
+        browser = await playwrightChromium.launch({ headless: HEADLESS });
+    }
+    
     const page = await browser.newPage();
+    
+    // Set longer timeout for serverless environments
+    if (IS_PRODUCTION) {
+        page.setDefaultTimeout(30000);
+        page.setDefaultNavigationTimeout(30000);
+    }
 
     // Navigate to login page
-    await page.goto(loginPage);
+    await page.goto(loginPage, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForLoadState('domcontentloaded');
 
     if (!HEADLESS) {
@@ -74,39 +99,53 @@ async function getAuthenticatedChromium() {
  * @returns 
  */
 async function getNextTripDetailsHtml() {
-    const { browser, page } = await getAuthenticatedChromium();
+    let browser, page;
+    try {
+        const result = await getAuthenticatedChromium();
+        browser = result.browser;
+        page = result.page;
 
-    if (!HEADLESS) {
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });
-    }
-
-    let html = await page.content();
-    let $ = cheerio.load(html);
-
-    // Use Cheerio selectors to extract the schedule data
-    const dashboardSelector = "div[class=trip-dashboard]"
-    let tripDashboardHtml = $(dashboardSelector).html();
-    // WHile schedule contains the word "Loading", wait for the page to load
-    attempt = 1;
-    while (tripDashboardHtml.includes("Loading")) {
-        console.log("attempt loading trip dashboard element: ", attempt++);
-        if (attempt > 10) {
-            throw new Error("Unable to load trip dashboard component.");
+        if (!HEADLESS) {
+            await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-cheerio.png` });
         }
-        await page.waitForLoadState('domcontentloaded');
-        if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` }); }
-        html = await page.content();
-        $ = cheerio.load(html);
-        tripDashboardHtml = $(dashboardSelector).html();
+
+        let html = await page.content();
+        let $ = cheerio.load(html);
+
+        // Use Cheerio selectors to extract the schedule data
+        const dashboardSelector = "div[class=trip-dashboard]"
+        let tripDashboardHtml = $(dashboardSelector).html();
+        // While schedule contains the word "Loading", wait for the page to load
+        let attempt = 1;
+        while (tripDashboardHtml.includes("Loading")) {
+            console.log("attempt loading trip dashboard element: ", attempt++);
+            if (attempt > 10) {
+                throw new Error("Unable to load trip dashboard component.");
+            }
+            await page.waitForLoadState('domcontentloaded');
+            if (!HEADLESS) { await page.screenshot({ path: `${process.env.HOME}/Downloads/finally-idle2.png` }); }
+            html = await page.content();
+            $ = cheerio.load(html);
+            tripDashboardHtml = $(dashboardSelector).html();
+        }
+
+        // replace any relative links with absolute links
+        tripDashboardHtml = makeRelativeLinksAbsolute(tripDashboardHtml);
+        let nextTripDetailsHtml = await extractNextRideDetailsHtml(tripDashboardHtml, page);
+        await page.close();
+        await browser.close();
+        return nextTripDetailsHtml;
+    } catch (error) {
+        console.error("Error in getNextTripDetailsHtml:", error);
+        // Ensure browser is closed on error
+        if (page) {
+            try { await page.close(); } catch (e) { console.error("Error closing page:", e); }
+        }
+        if (browser) {
+            try { await browser.close(); } catch (e) { console.error("Error closing browser:", e); }
+        }
+        throw error;
     }
-
-    // replace any relative links with absolute links
-    tripDashboardHtml = makeRelativeLinksAbsolute(tripDashboardHtml);
-    let nextTripDetailsHtml = await extractNextRideDetailsHtml(tripDashboardHtml, page);
-    await page.close();
-    await browser.close();
-    return nextTripDetailsHtml;
-
 }
 
 async function extractNextRideDetailsHtml(tripDashboardHtml, page) {
@@ -147,45 +186,60 @@ async function extractNextRideDetailsHtml(tripDashboardHtml, page) {
 }
 
 async function getUpcomingTripsHtml(exclude_cancelled, max_rides) {
-    const { browser, page } = await getAuthenticatedChromium();
+    let browser, page;
+    try {
+        const result = await getAuthenticatedChromium();
+        browser = result.browser;
+        page = result.page;
 
-    const upcomingTripsUrl = 'https://aar.mta.info/trips/upcoming';
-    await page.goto(upcomingTripsUrl);
-    await page.waitForLoadState('domcontentloaded');
-    
-    //  im waiting for all of them bc im not sure which on in this case lol
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForLoadState('load');
-    await page.waitForLoadState('networkidle');
-    if (!HEADLESS) {
-        await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-upcoming-trips.png` });
+        const upcomingTripsUrl = 'https://aar.mta.info/trips/upcoming';
+        await page.goto(upcomingTripsUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.waitForLoadState('domcontentloaded');
+        
+        //  im waiting for all of them bc im not sure which on in this case lol
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForLoadState('load');
+        await page.waitForLoadState('networkidle');
+        if (!HEADLESS) {
+            await page.screenshot({ path: `${process.env.HOME}/Downloads/pre-upcoming-trips.png` });
+        }
+
+        let html = await page.content();
+        let reservations = extractUpcomingTripDetails(html);
+        if (exclude_cancelled) {
+            reservations = reservations.filter(reservation => reservation.status !== 'Cancelled');
+        }
+
+        if (max_rides && reservations.length > max_rides) {
+            reservations = reservations.slice(0, max_rides);
+        }
+
+        const options = { weekday: 'short', month: 'short', day: 'numeric' };
+        let returnHtml = "<div>" + reservations.map(reservation => {
+            const date = new Date(reservation.date).toLocaleDateString('en-US', options);
+            return `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
+                <p><b>${date} | ${reservation.time}</b> (${reservation.status})</p>
+                <ul>
+                    <li> <b>Pick Up:</b> ${reservation.from.substring(0, reservation.from.length - 14)}</li>
+                    <li> <b>Drop Off:</b> ${reservation.to.substring(0, reservation.to.length - 14)}</li>
+                </ul>
+            </div>`;
+        }).join('\n') + "</div>";
+
+        await page.close();
+        await browser.close();
+        return returnHtml;
+    } catch (error) {
+        console.error("Error in getUpcomingTripsHtml:", error);
+        // Ensure browser is closed on error
+        if (page) {
+            try { await page.close(); } catch (e) { console.error("Error closing page:", e); }
+        }
+        if (browser) {
+            try { await browser.close(); } catch (e) { console.error("Error closing browser:", e); }
+        }
+        throw error;
     }
-
-    let html = await page.content();
-    let reservations = extractUpcomingTripDetails(html);
-    if (exclude_cancelled) {
-        reservations = reservations.filter(reservation => reservation.status !== 'Cancelled');
-    }
-
-    if (max_rides && reservations.length > max_rides) {
-        reservations = reservations.slice(0, max_rides);
-    }
-
-    const options = { weekday: 'short', month: 'short', day: 'numeric' };
-    let returnHtml = "<div>" + reservations.map(reservation => {
-        const date = new Date(reservation.date).toLocaleDateString('en-US', options);
-        return `<div style="border: 1px solid black; padding: 10px; margin: 10px;">
-            <p><b>${date} | ${reservation.time}</b> (${reservation.status})</p>
-            <ul>
-                <li> <b>Pick Up:</b> ${reservation.from.substring(0, reservation.from.length - 14)}</li>
-                <li> <b>Drop Off:</b> ${reservation.to.substring(0, reservation.to.length - 14)}</li>
-            </ul>
-        </div>`;
-    }).join('\n') + "</div>";
-
-    await page.close();
-    await browser.close();
-    return returnHtml;
 }
 
 function extractUpcomingTripDetails(html) {
